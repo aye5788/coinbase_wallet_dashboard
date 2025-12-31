@@ -1,1 +1,7 @@
+streamlit
+requests
+pandas
+web3
+solana
+python-dotenv
 
