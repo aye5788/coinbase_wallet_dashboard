@@ -4,11 +4,7 @@ from data.prices import get_prices
 from utils.chains import CHAINS
 from utils.formatting import usd
 
-# --------------------
-# Security gate
-# --------------------
-if st.text_input("Password", type="password") != st.secrets["APP_PASSWORD"]:
-    st.stop()
+
 
 st.set_page_config(page_title="Wallet Dashboard", layout="wide")
 st.title("📊 Private Wallet Dashboard")
