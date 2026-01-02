@@ -1,56 +1,28 @@
 import streamlit as st
+from datetime import datetime, timezone
+import csv
+import os
+
 from data.balances import get_all_balances
 from data.prices import get_prices
-from utils.chains import CHAINS
 from utils.formatting import usd
 
 
-
+# --------------------
+# Page config
+# --------------------
 st.set_page_config(page_title="Wallet Dashboard", layout="wide")
 st.title("📊 Private Wallet Dashboard")
 
+
 # --------------------
-# Load data
+# Load balances
 # --------------------
 balances = get_all_balances()
 
-rows = []
-total_usd = 0
-
-price_ids = set()
-for asset in balances:
-    if asset == "ETH":
-        price_ids.add("ethereum")
-    elif asset == "SOL":
-        price_ids.add("solana")
-    else:
-        price_ids.add(asset.lower())
-
-prices = get_prices(list(price_ids))
-
-for asset, info in balances.items():
-    total = info["total"]
-
-    if asset == "ETH":
-        price = prices["ethereum"]["usd"]
-    elif asset == "SOL":
-        price = prices["solana"]["usd"]
-    else:
-        price = prices.get(asset.lower(), {}).get("usd", 0)
-
-    value = total * price
-    total_usd += value
-
-    rows.append({
-        "Asset": asset,
-        "Balance": round(total, 6),
-        "USD Value": f"${value:,.2f}",
-        "Networks": ", ".join(info["chains"].keys()),
-    })
-
 
 # --------------------
-# Build price list
+# Determine required prices
 # --------------------
 price_ids = set()
 
@@ -63,6 +35,37 @@ for asset in balances:
         price_ids.add(asset.lower())
 
 prices = get_prices(list(price_ids))
+
+
+# --------------------
+# Snapshot logic (Phase 1 P/L foundation)
+# --------------------
+SNAPSHOT_FILE = "data/snapshots.csv"
+os.makedirs("data", exist_ok=True)
+
+file_exists = os.path.exists(SNAPSHOT_FILE)
+
+with open(SNAPSHOT_FILE, "a", newline="") as f:
+    writer = csv.writer(f)
+
+    if not file_exists:
+        writer.writerow(["timestamp", "asset", "balance", "usd_value"])
+
+    ts = datetime.now(timezone.utc).isoformat()
+
+    for asset, info in balances.items():
+        total = info["total"]
+
+        if asset == "ETH":
+            price = prices["ethereum"]["usd"]
+        elif asset == "SOL":
+            price = prices["solana"]["usd"]
+        else:
+            price = prices.get(asset.lower(), {}).get("usd", 0)
+
+        usd_value = total * price
+        writer.writerow([ts, asset, total, usd_value])
+
 
 # --------------------
 # Compute totals (ASSET AGGREGATED)
@@ -87,12 +90,12 @@ for asset, info in balances.items():
         "Asset": asset,
         "Balance": round(total, 6),
         "USD Value": usd(value),
-       "Networks": " • ".join(
-    f"{chain}: {round(amount, 6)}"
-    for chain, amount in info["chains"].items()
-),
-
+        "Networks": " • ".join(
+            f"{chain}: {round(amount, 6)}"
+            for chain, amount in info["chains"].items()
+        ),
     })
+
 
 # --------------------
 # Display
