@@ -183,4 +183,7 @@ with st.expander("🧪 Snapshot Inspector (Debug)"):
         st.dataframe(df_snap, width="stretch")
     else:
         st.write("No snapshots yet.")
+from data.coinbase import get_coinbase_balances
+
+st.write("Coinbase test:", get_coinbase_balances())
 
