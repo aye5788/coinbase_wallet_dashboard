@@ -117,7 +117,6 @@ def get_coinbase_balances():
 
     return balances
 
-if __name__ == "__main__":
-    balances = get_coinbase_balances()
+
     print(balances)
 
