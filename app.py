@@ -187,3 +187,13 @@ from data.coinbase import get_coinbase_balances
 
 st.write("Coinbase test:", get_coinbase_balances())
 
+from data.coinbase import get_coinbase_balances
+
+st.markdown("### Coinbase connection test (temporary)")
+try:
+    cb_balances = get_coinbase_balances()
+    st.write(cb_balances)
+except Exception as e:
+    st.error(str(e))
+
+
