@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 
 from data.balances import get_all_balances
 from data.prices import get_prices
@@ -41,7 +42,7 @@ prices = get_prices(list(price_ids))
 
 
 # --------------------
-# Snapshot handling (delegated)
+# Snapshot handling
 # --------------------
 if should_write_snapshot():
     write_snapshot(balances, prices)
@@ -71,12 +72,46 @@ for asset, info in balances.items():
 
 
 # --------------------
-# Compute P/L (per-asset + account)
+# Compute P/L
 # --------------------
 asset_pl = compute_asset_pl(snapshots, current_values)
 
 pl_since_start = sum(v["since_start"] for v in asset_pl.values()) if asset_pl else 0.0
 pl_since_last = sum(v["since_last"] for v in asset_pl.values()) if asset_pl else 0.0
+
+start_base = total_usd - pl_since_start
+pl_start_pct = (pl_since_start / start_base * 100) if start_base > 0 else 0.0
+
+
+# --------------------
+# Display top metrics
+# --------------------
+c1, c2, c3 = st.columns(3)
+
+c1.metric("Total Portfolio Value", usd(total_usd))
+c2.metric("P/L Since Start", usd(pl_since_start), f"{pl_start_pct:.2f}%")
+c3.metric("P/L Since Last Snapshot", usd(pl_since_last))
+
+
+# --------------------
+# Equity curve
+# --------------------
+if snapshots:
+    df_snap = pd.DataFrame(snapshots)
+    df_snap["usd_value"] = df_snap["usd_value"].astype(float)
+
+    equity = (
+        df_snap.groupby("timestamp")["usd_value"]
+        .sum()
+        .reset_index()
+        .sort_values("timestamp")
+    )
+
+    st.subheader("📈 Portfolio Equity Curve")
+    st.line_chart(
+        equity.set_index("timestamp")["usd_value"],
+        height=300,
+    )
 
 
 # --------------------
@@ -86,29 +121,66 @@ rows = []
 
 for asset, info in balances.items():
     pl_start = asset_pl.get(asset, {}).get("since_start", 0.0)
-    pl_last = asset_pl.get(asset, {}).get("since_last", 0.0)
+    pl_recent = asset_pl.get(asset, {}).get("since_last", 0.0)
+
+    base_val = current_values[asset] - pl_start
+    pl_pct = (pl_start / base_val * 100) if base_val > 0 else 0.0
+
+    recent_pct = (
+        pl_recent / (current_values[asset] - pl_recent) * 100
+        if current_values[asset] - pl_recent > 0
+        else 0.0
+    )
 
     rows.append({
         "Asset": asset,
         "Balance": round(info["total"], 6),
-        "USD Value": usd(current_values[asset]),
-        "P/L (Start)": usd(pl_start),
-        "P/L (Recent)": usd(pl_last),
+        "USD Value": current_values[asset],
+        "P/L $ (Start)": pl_start,
+        "P/L % (Start)": pl_pct,
+        "P/L $ (Recent)": pl_recent,
+        "P/L % (Recent)": recent_pct,
         "Networks": " • ".join(
             f"{chain}: {round(amount, 6)}"
             for chain, amount in info["chains"].items()
         ),
     })
 
+df = pd.DataFrame(rows)
+
 
 # --------------------
-# Display
+# Formatting + color
 # --------------------
-c1, c2, c3 = st.columns(3)
+def color_pl(val):
+    if val > 0:
+        return "color: green"
+    if val < 0:
+        return "color: red"
+    return "color: gray"
 
-c1.metric("Total Portfolio Value", usd(total_usd))
-c2.metric("P/L Since Start", usd(pl_since_start))
-c3.metric("P/L Since Last Snapshot", usd(pl_since_last))
+
+styled = df.style.format({
+    "USD Value": usd,
+    "P/L $ (Start)": usd,
+    "P/L $ (Recent)": usd,
+    "P/L % (Start)": "{:.2f}%",
+    "P/L % (Recent)": "{:.2f}%",
+}).applymap(
+    color_pl,
+    subset=["P/L $ (Start)", "P/L $ (Recent)", "P/L % (Start)", "P/L % (Recent)"]
+)
 
 st.subheader("Holdings")
-st.dataframe(rows, width="stretch")
+st.dataframe(styled, width="stretch")
+
+
+# --------------------
+# Snapshot inspector
+# --------------------
+with st.expander("🧪 Snapshot Inspector (Debug)"):
+    if snapshots:
+        st.dataframe(df_snap, width="stretch")
+    else:
+        st.write("No snapshots yet.")
+
