@@ -87,7 +87,11 @@ for asset, info in balances.items():
         "Asset": asset,
         "Balance": round(total, 6),
         "USD Value": usd(value),
-        "Networks": ", ".join(info["chains"].keys()),
+       "Networks": " • ".join(
+    f"{chain}: {round(amount, 6)}"
+    for chain, amount in info["chains"].items()
+),
+
     })
 
 # --------------------
