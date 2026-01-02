@@ -38,33 +38,53 @@ prices = get_prices(list(price_ids))
 
 
 # --------------------
-# Snapshot logic (Phase 1 P/L foundation)
+# Snapshot logic (2-hour gating)
 # --------------------
 SNAPSHOT_FILE = "data/snapshots.csv"
+SNAPSHOT_INTERVAL_SECONDS = 2 * 60 * 60  # 2 hours
+
 os.makedirs("data", exist_ok=True)
 
-file_exists = os.path.exists(SNAPSHOT_FILE)
+def should_write_snapshot():
+    if not os.path.exists(SNAPSHOT_FILE):
+        return True
 
-with open(SNAPSHOT_FILE, "a", newline="") as f:
-    writer = csv.writer(f)
+    try:
+        with open(SNAPSHOT_FILE, "r") as f:
+            last_line = list(csv.reader(f))[-1]
+            last_ts = datetime.fromisoformat(last_line[0])
+            now = datetime.now(timezone.utc)
 
-    if not file_exists:
-        writer.writerow(["timestamp", "asset", "balance", "usd_value"])
+            elapsed = (now - last_ts).total_seconds()
+            return elapsed >= SNAPSHOT_INTERVAL_SECONDS
+    except Exception:
+        # If anything goes wrong, fail safe and write
+        return True
 
-    ts = datetime.now(timezone.utc).isoformat()
 
-    for asset, info in balances.items():
-        total = info["total"]
+if should_write_snapshot():
+    file_exists = os.path.exists(SNAPSHOT_FILE)
 
-        if asset == "ETH":
-            price = prices["ethereum"]["usd"]
-        elif asset == "SOL":
-            price = prices["solana"]["usd"]
-        else:
-            price = prices.get(asset.lower(), {}).get("usd", 0)
+    with open(SNAPSHOT_FILE, "a", newline="") as f:
+        writer = csv.writer(f)
 
-        usd_value = total * price
-        writer.writerow([ts, asset, total, usd_value])
+        if not file_exists:
+            writer.writerow(["timestamp", "asset", "balance", "usd_value"])
+
+        ts = datetime.now(timezone.utc).isoformat()
+
+        for asset, info in balances.items():
+            total = info["total"]
+
+            if asset == "ETH":
+                price = prices["ethereum"]["usd"]
+            elif asset == "SOL":
+                price = prices["solana"]["usd"]
+            else:
+                price = prices.get(asset.lower(), {}).get("usd", 0)
+
+            usd_value = total * price
+            writer.writerow([ts, asset, total, usd_value])
 
 
 # --------------------
