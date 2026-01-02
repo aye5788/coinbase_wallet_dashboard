@@ -116,3 +116,8 @@ def get_coinbase_balances():
         balances[currency] = usd_val
 
     return balances
+
+if __name__ == "__main__":
+    balances = get_coinbase_balances()
+    print(balances)
+
