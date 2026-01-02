@@ -14,10 +14,39 @@ st.title("📊 Private Wallet Dashboard")
 # --------------------
 balances = get_all_balances()
 
-price_ids = list({
-    CHAINS[c]["coingecko_id"] for c in balances
-})
-prices = get_prices(price_ids)
+rows = []
+total_usd = 0
+
+price_ids = set()
+for asset in balances:
+    if asset == "ETH":
+        price_ids.add("ethereum")
+    elif asset == "SOL":
+        price_ids.add("solana")
+    else:
+        price_ids.add(asset.lower())
+
+prices = get_prices(list(price_ids))
+
+for asset, info in balances.items():
+    total = info["total"]
+
+    if asset == "ETH":
+        price = prices["ethereum"]["usd"]
+    elif asset == "SOL":
+        price = prices["solana"]["usd"]
+    else:
+        price = prices.get(asset.lower(), {}).get("usd", 0)
+
+    value = total * price
+    total_usd += value
+
+    rows.append({
+        "Asset": asset,
+        "Balance": round(total, 6),
+        "USD Value": f"${value:,.2f}",
+        "Networks": ", ".join(info["chains"].keys()),
+    })
 
 # --------------------
 # Compute totals
