@@ -51,14 +51,14 @@ def should_write_snapshot():
 
     try:
         with open(SNAPSHOT_FILE, "r") as f:
-            last_line = list(csv.reader(f))[-1]
-            last_ts = datetime.fromisoformat(last_line[0])
-            now = datetime.now(timezone.utc)
+            rows = list(csv.reader(f))
+            if len(rows) < 2:
+                return True
 
-            elapsed = (now - last_ts).total_seconds()
-            return elapsed >= SNAPSHOT_INTERVAL_SECONDS
+            last_ts = datetime.fromisoformat(rows[-1][0])
+            now = datetime.now(timezone.utc)
+            return (now - last_ts).total_seconds() >= SNAPSHOT_INTERVAL_SECONDS
     except Exception:
-        # If anything goes wrong, fail safe and write
         return True
 
 
@@ -88,7 +88,50 @@ if should_write_snapshot():
 
 
 # --------------------
-# Compute totals (ASSET AGGREGATED)
+# Read snapshots + compute P/L
+# --------------------
+pl_since_start = 0.0
+pl_since_last = 0.0
+
+snapshots = []
+
+if os.path.exists(SNAPSHOT_FILE):
+    with open(SNAPSHOT_FILE, "r") as f:
+        reader = csv.DictReader(f)
+        snapshots = list(reader)
+
+if snapshots:
+    # Group snapshots by timestamp
+    by_ts = {}
+    for row in snapshots:
+        ts = row["timestamp"]
+        by_ts.setdefault(ts, 0.0)
+        by_ts[ts] += float(row["usd_value"])
+
+    timestamps = sorted(by_ts.keys())
+
+    first_value = by_ts[timestamps[0]]
+    last_snapshot_value = by_ts[timestamps[-1]]
+
+    current_value = 0.0
+    for asset, info in balances.items():
+        total = info["total"]
+
+        if asset == "ETH":
+            price = prices["ethereum"]["usd"]
+        elif asset == "SOL":
+            price = prices["solana"]["usd"]
+        else:
+            price = prices.get(asset.lower(), {}).get("usd", 0)
+
+        current_value += total * price
+
+    pl_since_start = current_value - first_value
+    pl_since_last = current_value - last_snapshot_value
+
+
+# --------------------
+# Compute current totals (ASSET AGGREGATED)
 # --------------------
 rows = []
 total_usd = 0
@@ -120,6 +163,24 @@ for asset, info in balances.items():
 # --------------------
 # Display
 # --------------------
-st.metric("Total Portfolio Value", usd(total_usd))
+col1, col2, col3 = st.columns(3)
+
+col1.metric("Total Portfolio Value", usd(total_usd))
+
+if snapshots:
+    col2.metric(
+        "P/L Since Start",
+        usd(pl_since_start),
+        delta=f"{(pl_since_start / (total_usd - pl_since_start) * 100):.2f}%" if total_usd != pl_since_start else None,
+    )
+
+    col3.metric(
+        "P/L Since Last Snapshot",
+        usd(pl_since_last),
+    )
+else:
+    col2.metric("P/L Since Start", "—")
+    col3.metric("P/L Since Last Snapshot", "—")
+
 st.subheader("Holdings")
 st.dataframe(rows, width="stretch")
