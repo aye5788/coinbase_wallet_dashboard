@@ -50,10 +50,49 @@ for asset, info in balances.items():
 
 
 # --------------------
+# Build price list
+# --------------------
+price_ids = set()
+
+for asset in balances:
+    if asset == "ETH":
+        price_ids.add("ethereum")
+    elif asset == "SOL":
+        price_ids.add("solana")
+    else:
+        price_ids.add(asset.lower())
+
+prices = get_prices(list(price_ids))
+
+# --------------------
+# Compute totals (ASSET AGGREGATED)
+# --------------------
+rows = []
+total_usd = 0
+
+for asset, info in balances.items():
+    total = info["total"]
+
+    if asset == "ETH":
+        price = prices["ethereum"]["usd"]
+    elif asset == "SOL":
+        price = prices["solana"]["usd"]
+    else:
+        price = prices.get(asset.lower(), {}).get("usd", 0)
+
+    value = total * price
+    total_usd += value
+
+    rows.append({
+        "Asset": asset,
+        "Balance": round(total, 6),
+        "USD Value": usd(value),
+        "Networks": ", ".join(info["chains"].keys()),
+    })
+
+# --------------------
 # Display
 # --------------------
 st.metric("Total Portfolio Value", usd(total_usd))
-
 st.subheader("Holdings")
-st.dataframe(rows, use_container_width=True)
-
+st.dataframe(rows, width="stretch")
