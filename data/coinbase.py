@@ -1,95 +1,82 @@
 import time
 import json
+import secrets
+import base64
 import requests
+
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+from cryptography.hazmat.primitives.hashes import SHA256
+
 import streamlit as st
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.hashes import SHA256
-from cryptography.hazmat.primitives.asymmetric.utils import (
-    encode_dss_signature
-)
 
-import base64
-import hashlib
+COINBASE_API_BASE = "https://api.coinbase.com"
 
 
-BASE_URL = "https://api.coinbase.com"
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
-# --------------------
-# Load private key
-# --------------------
 def _load_private_key():
-    pem = st.secrets["COINBASE_PRIVATE_KEY"].encode()
+    pem = st.secrets["COINBASE_PRIVATE_KEY"]
     return serialization.load_pem_private_key(
-        pem,
+        pem.encode(),
         password=None,
     )
 
 
-# --------------------
-# Build JWT
-# --------------------
-def _build_jwt(method: str, path: str):
+def _build_jwt(method: str, path: str) -> str:
+    """
+    Build ES256 JWT for Coinbase Advanced API
+    """
+
     key_id = st.secrets["COINBASE_KEY_ID"]
     private_key = _load_private_key()
 
     header = {
         "alg": "ES256",
-        "typ": "JWT",
         "kid": key_id,
+        "nonce": secrets.token_hex(16),
     }
 
-    now = int(time.time())
     payload = {
-        "iss": "coinbase",
+        "iss": "cdp",
         "sub": key_id,
-        "nbf": now,
-        "exp": now + 120,
-        "uri": f"{method} {path}",
+        "aud": ["api.coinbase.com"],
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 120,
+        "uri": f"{method} api.coinbase.com{path}",
     }
 
-    def b64url(data: bytes) -> bytes:
-        return base64.urlsafe_b64encode(data).rstrip(b"=")
+    header_b64 = _b64url(json.dumps(header, separators=(",", ":")).encode())
+    payload_b64 = _b64url(json.dumps(payload, separators=(",", ":")).encode())
 
-    header_b64 = b64url(json.dumps(header).encode())
-    payload_b64 = b64url(json.dumps(payload).encode())
+    signing_input = f"{header_b64}.{payload_b64}".encode()
 
-    message = header_b64 + b"." + payload_b64
-
-    signature = private_key.sign(
-        message,
+    signature_der = private_key.sign(
+        signing_input,
         ec.ECDSA(SHA256())
     )
 
-    r, s = decode_signature(signature)
-    sig_bytes = r + s
-    sig_b64 = b64url(sig_bytes)
+    r, s = decode_dss_signature(signature_der)
+    r_bytes = r.to_bytes(32, "big")
+    s_bytes = s.to_bytes(32, "big")
+    signature_raw = r_bytes + s_bytes
 
-    return (message + b"." + sig_b64).decode()
+    signature_b64 = _b64url(signature_raw)
 
-
-def decode_signature(signature: bytes):
-    r, s = ec.utils.decode_dss_signature(signature)
-    r_bytes = r.to_bytes(32, byteorder="big")
-    s_bytes = s.to_bytes(32, byteorder="big")
-    return r_bytes, s_bytes
+    return f"{header_b64}.{payload_b64}.{signature_b64}"
 
 
-# --------------------
-# Public API
-# --------------------
-def get_coinbase_balances():
+def get_coinbase_balances() -> dict[str, float]:
     """
-    Returns:
-      {
-        "BTC": usd_value,
-        "ETH": usd_value,
-        "USD": usd_value,
-        ...
-      }
+    Returns raw Coinbase balances by asset symbol.
+    Example:
+        {"BTC": 0.01, "ETH": 1.2, "USD": 350.0}
     """
+
     path = "/v2/accounts"
     jwt = _build_jwt("GET", path)
 
@@ -98,25 +85,34 @@ def get_coinbase_balances():
         "Content-Type": "application/json",
     }
 
-    resp = requests.get(BASE_URL + path, headers=headers)
-    resp.raise_for_status()
+    balances: dict[str, float] = {}
+    url = f"{COINBASE_API_BASE}{path}"
 
-    data = resp.json()["data"]
+    while url:
+        resp = requests.get(url, headers=headers, timeout=30)
 
-    balances = {}
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Coinbase API error {resp.status_code}: {resp.text}"
+            )
 
-    for acct in data:
-        amount = float(acct["balance"]["amount"])
-        if amount == 0:
-            continue
+        data = resp.json()
 
-        currency = acct["currency"]["code"]
-        usd_val = float(acct["balance"]["usd"])
+        for acct in data.get("data", []):
+            bal = acct.get("balance", {})
+            amount = float(bal.get("amount", 0))
+            symbol = bal.get("currency")
 
-        balances[currency] = usd_val
+            if amount != 0 and symbol:
+                balances[symbol] = balances.get(symbol, 0) + amount
+
+        pagination = data.get("pagination", {})
+        next_uri = pagination.get("next_uri")
+
+        if next_uri:
+            url = f"{COINBASE_API_BASE}{next_uri}"
+        else:
+            url = None
 
     return balances
-
-
-    print(balances)
 
