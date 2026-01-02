@@ -1,10 +1,13 @@
 import streamlit as st
-from datetime import datetime, timezone
-import csv
-import os
 
 from data.balances import get_all_balances
 from data.prices import get_prices
+from data.snapshots import (
+    should_write_snapshot,
+    write_snapshot,
+    read_snapshots,
+    compute_asset_pl,
+)
 from utils.formatting import usd
 
 
@@ -38,103 +41,19 @@ prices = get_prices(list(price_ids))
 
 
 # --------------------
-# Snapshot logic (2-hour gating)
+# Snapshot handling (delegated)
 # --------------------
-SNAPSHOT_FILE = "data/snapshots.csv"
-SNAPSHOT_INTERVAL_SECONDS = 2 * 60 * 60  # 2 hours
-
-os.makedirs("data", exist_ok=True)
-
-def should_write_snapshot():
-    if not os.path.exists(SNAPSHOT_FILE):
-        return True
-
-    try:
-        with open(SNAPSHOT_FILE, "r") as f:
-            rows = list(csv.reader(f))
-            if len(rows) < 2:
-                return True
-
-            last_ts = datetime.fromisoformat(rows[-1][0])
-            now = datetime.now(timezone.utc)
-            return (now - last_ts).total_seconds() >= SNAPSHOT_INTERVAL_SECONDS
-    except Exception:
-        return True
-
-
 if should_write_snapshot():
-    file_exists = os.path.exists(SNAPSHOT_FILE)
+    write_snapshot(balances, prices)
 
-    with open(SNAPSHOT_FILE, "a", newline="") as f:
-        writer = csv.writer(f)
-
-        if not file_exists:
-            writer.writerow(["timestamp", "asset", "balance", "usd_value"])
-
-        ts = datetime.now(timezone.utc).isoformat()
-
-        for asset, info in balances.items():
-            total = info["total"]
-
-            if asset == "ETH":
-                price = prices["ethereum"]["usd"]
-            elif asset == "SOL":
-                price = prices["solana"]["usd"]
-            else:
-                price = prices.get(asset.lower(), {}).get("usd", 0)
-
-            usd_value = total * price
-            writer.writerow([ts, asset, total, usd_value])
+snapshots = read_snapshots()
 
 
 # --------------------
-# Read snapshots + compute P/L
+# Compute current values
 # --------------------
-pl_since_start = 0.0
-pl_since_last = 0.0
-
-snapshots = []
-
-if os.path.exists(SNAPSHOT_FILE):
-    with open(SNAPSHOT_FILE, "r") as f:
-        reader = csv.DictReader(f)
-        snapshots = list(reader)
-
-if snapshots:
-    # Group snapshots by timestamp
-    by_ts = {}
-    for row in snapshots:
-        ts = row["timestamp"]
-        by_ts.setdefault(ts, 0.0)
-        by_ts[ts] += float(row["usd_value"])
-
-    timestamps = sorted(by_ts.keys())
-
-    first_value = by_ts[timestamps[0]]
-    last_snapshot_value = by_ts[timestamps[-1]]
-
-    current_value = 0.0
-    for asset, info in balances.items():
-        total = info["total"]
-
-        if asset == "ETH":
-            price = prices["ethereum"]["usd"]
-        elif asset == "SOL":
-            price = prices["solana"]["usd"]
-        else:
-            price = prices.get(asset.lower(), {}).get("usd", 0)
-
-        current_value += total * price
-
-    pl_since_start = current_value - first_value
-    pl_since_last = current_value - last_snapshot_value
-
-
-# --------------------
-# Compute current totals (ASSET AGGREGATED)
-# --------------------
-rows = []
-total_usd = 0
+current_values = {}
+total_usd = 0.0
 
 for asset, info in balances.items():
     total = info["total"]
@@ -147,12 +66,34 @@ for asset, info in balances.items():
         price = prices.get(asset.lower(), {}).get("usd", 0)
 
     value = total * price
+    current_values[asset] = value
     total_usd += value
+
+
+# --------------------
+# Compute P/L (per-asset + account)
+# --------------------
+asset_pl = compute_asset_pl(snapshots, current_values)
+
+pl_since_start = sum(v["since_start"] for v in asset_pl.values()) if asset_pl else 0.0
+pl_since_last = sum(v["since_last"] for v in asset_pl.values()) if asset_pl else 0.0
+
+
+# --------------------
+# Build holdings table
+# --------------------
+rows = []
+
+for asset, info in balances.items():
+    pl_start = asset_pl.get(asset, {}).get("since_start", 0.0)
+    pl_last = asset_pl.get(asset, {}).get("since_last", 0.0)
 
     rows.append({
         "Asset": asset,
-        "Balance": round(total, 6),
-        "USD Value": usd(value),
+        "Balance": round(info["total"], 6),
+        "USD Value": usd(current_values[asset]),
+        "P/L (Start)": usd(pl_start),
+        "P/L (Recent)": usd(pl_last),
         "Networks": " • ".join(
             f"{chain}: {round(amount, 6)}"
             for chain, amount in info["chains"].items()
@@ -163,24 +104,11 @@ for asset, info in balances.items():
 # --------------------
 # Display
 # --------------------
-col1, col2, col3 = st.columns(3)
+c1, c2, c3 = st.columns(3)
 
-col1.metric("Total Portfolio Value", usd(total_usd))
-
-if snapshots:
-    col2.metric(
-        "P/L Since Start",
-        usd(pl_since_start),
-        delta=f"{(pl_since_start / (total_usd - pl_since_start) * 100):.2f}%" if total_usd != pl_since_start else None,
-    )
-
-    col3.metric(
-        "P/L Since Last Snapshot",
-        usd(pl_since_last),
-    )
-else:
-    col2.metric("P/L Since Start", "—")
-    col3.metric("P/L Since Last Snapshot", "—")
+c1.metric("Total Portfolio Value", usd(total_usd))
+c2.metric("P/L Since Start", usd(pl_since_start))
+c3.metric("P/L Since Last Snapshot", usd(pl_since_last))
 
 st.subheader("Holdings")
 st.dataframe(rows, width="stretch")
