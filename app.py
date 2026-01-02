@@ -48,24 +48,6 @@ for asset, info in balances.items():
         "Networks": ", ".join(info["chains"].keys()),
     })
 
-# --------------------
-# Compute totals
-# --------------------
-rows = []
-total_usd = 0
-
-for chain, amount in balances.items():
-    cg_id = CHAINS[chain]["coingecko_id"]
-    price = prices[cg_id]["usd"]
-    value = amount * price
-    total_usd += value
-
-    rows.append({
-        "Chain": chain.title(),
-        "Balance": round(amount, 4),
-        "Price": usd(price),
-        "Value": usd(value),
-    })
 
 # --------------------
 # Display
