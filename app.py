@@ -179,12 +179,6 @@ st.dataframe(styled, width="stretch")
 # Snapshot inspector
 # --------------------
 with st.expander("🧪 Snapshot Inspector (Debug)"):
-    if snapshots:
-        st.dataframe(df_snap, width="stretch")
-    else:
-        st.write("No snapshots yet.")
-with st.expander("🧪 Snapshot Inspector (Debug)"):
-    ...
 from data.coinbase import get_coinbase_balances
 
 st.markdown("---")
@@ -195,5 +189,4 @@ try:
     st.write(cb_balances)
 except Exception as e:
     st.error(str(e))
-
 
