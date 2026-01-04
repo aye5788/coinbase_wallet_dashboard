@@ -98,7 +98,10 @@ c3.metric("P/L Since Last Snapshot", usd(pl_since_last))
 # --------------------
 if snapshots:
     df_snap = pd.DataFrame(snapshots)
-    df_snap["usd_value"] = df_snap["usd_value"].astype(float)
+
+    # Defensive conversion (in case of malformed rows)
+    df_snap["usd_value"] = pd.to_numeric(df_snap["usd_value"], errors="coerce")
+    df_snap = df_snap.dropna(subset=["usd_value"])
 
     equity = (
         df_snap.groupby("timestamp")["usd_value"]
@@ -179,14 +182,8 @@ st.dataframe(styled, width="stretch")
 # Snapshot inspector
 # --------------------
 with st.expander("🧪 Snapshot Inspector (Debug)"):
-from data.coinbase import get_coinbase_balances
-
-st.markdown("---")
-st.markdown("### Coinbase connection test (temporary)")
-
-try:
-    cb_balances = get_coinbase_balances()
-    st.write(cb_balances)
-except Exception as e:
-    st.error(str(e))
+    if snapshots:
+        st.dataframe(df_snap, width="stretch")
+    else:
+        st.write("No snapshots yet.")
 
