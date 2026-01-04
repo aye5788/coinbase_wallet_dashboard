@@ -61,19 +61,21 @@ def compute_asset_pl(snapshots, current_values):
         return {}
 
     by_ts = {}
+
     for row in snapshots:
-    # Skip malformed/header rows
-    try:
-        val = float(row["usd_value"])
-    except (ValueError, TypeError, KeyError):
-        continue
-
-    ts = row["timestamp"]
-    asset = row["asset"]
-
+        # Skip malformed or header rows
+        try:
+            ts = row["timestamp"]
+            asset = row["asset"]
+            val = float(row["usd_value"])
+        except (ValueError, TypeError, KeyError):
+            continue
 
         by_ts.setdefault(ts, {})
         by_ts[ts][asset] = val
+
+    if not by_ts:
+        return {}
 
     timestamps = sorted(by_ts.keys())
     first = by_ts[timestamps[0]]
@@ -91,4 +93,5 @@ def compute_asset_pl(snapshots, current_values):
         }
 
     return pl
+
 
