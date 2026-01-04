@@ -21,7 +21,7 @@ st.title("📊 Private Portfolio Dashboard")
 
 
 # =====================================================
-# WALLET SECTION (UNCHANGED LOGIC)
+# WALLET SECTION
 # =====================================================
 
 wallet_balances = get_all_balances()
@@ -161,11 +161,26 @@ st.dataframe(
 
 
 # =====================================================
-# COINBASE SECTION (SEPARATE)
+# COINBASE SECTION (SEPARATE, PRICED CORRECTLY)
 # =====================================================
 
 st.divider()
 st.subheader("🏦 Coinbase Exchange (Custodial)")
+
+
+# Coinbase symbol → CoinGecko ID map
+COINBASE_PRICE_MAP = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "CBETH": "coinbase-wrapped-staked-eth",
+    "SOL": "solana",
+    "ATOM": "cosmos",
+    "USDC": "usd-coin",
+    "DAI": "dai",
+    "PAXG": "pax-gold",
+    "POL": "polygon",
+}
+
 
 try:
     cb_balances = get_coinbase_balances()
@@ -173,17 +188,23 @@ except Exception as e:
     st.error(f"Coinbase error: {e}")
     cb_balances = {}
 
+
 if cb_balances:
+    cb_price_ids = [
+        COINBASE_PRICE_MAP[s]
+        for s in cb_balances
+        if s in COINBASE_PRICE_MAP
+    ]
+
+    cb_prices = get_prices(cb_price_ids)
+
     cb_rows = []
     cb_total = 0.0
 
     for symbol, amount in cb_balances.items():
-        if symbol.lower() in prices:
-            price = prices[symbol.lower()]["usd"]
-            usd_val = amount * price
-        else:
-            price = None
-            usd_val = 0.0
+        gecko_id = COINBASE_PRICE_MAP.get(symbol)
+        price = cb_prices.get(gecko_id, {}).get("usd", 0.0) if gecko_id else 0.0
+        usd_val = amount * price
 
         cb_total += usd_val
 
