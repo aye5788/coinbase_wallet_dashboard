@@ -224,3 +224,4 @@ if cb_balances:
 else:
     st.write("No Coinbase balances found.")
 
+
